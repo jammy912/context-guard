@@ -10,9 +10,10 @@ description: 把目前的工作 session 存成可追溯的 Markdown 工作日誌
 ## 存在哪裡
 
 - **一律存在 `~/.claude/worklogs/`**（Windows 是 `%USERPROFILE%\.claude\worklogs\`），不存進專案目錄。日誌常含主機、IP、帳號、客戶名稱，放在專案底下會跟著 git 進 repo。
-- 檔名：呼叫方（例如 context-guard）給了完整路徑就照用，通常是 `<session_id>.md`；沒給時用 `YYYY-MM-DD-主題.md`，日期取本機當天，主題來自內容。
-- 不知道 session id 就不要猜。**不能用「最近修改的 session 檔」認領目前的 session，也不能借用其他 session 的 ID 或結論。**
-- 檔案已存在且確定是同一個 session 先前寫的：先讀舊內容，合併成一份完整日誌再整份覆寫，全檔只能有一個 `## 恢復會話`。無法確認是同一個 session 時保留舊檔，新檔加簡短後綴。
+- 檔名一律用 session id：**`${CLAUDE_SESSION_ID}.md`**（這是 Claude Code 載入 skill 時代入的目前 session id）。手動呼叫和 context-guard 按鈕流程都寫到同一個檔；context-guard 給了完整路徑時照它給的。
+- 上一行如果顯示的是字面上的 `${CLAUDE_SESSION_ID}`（宿主沒有代入，例如不是 Claude Code），改用 `YYYY-MM-DD-主題.md`，日期取本機當天，主題來自內容。
+- 不要自己推 session id。**不能用「最近修改的 session 檔」認領目前的 session，也不能借用其他 session 的 ID 或結論。**
+- 檔案已存在：檔名就是這個 session 的 id，所以是同一個 session 先前寫的。先讀舊內容，合併成一份完整日誌再整份覆寫，全檔只能有一個 `## 恢復會話`。
 
 請求寫日誌就是對這份本機檔案的寫入授權，目錄不存在就建立。
 
