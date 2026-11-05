@@ -96,11 +96,22 @@ export function isReminderShown(view: GuardView, settings: GuardSettings): boole
   )
 }
 
-export type LogReport = { log: string; goal: string; pending: string }
+export type LogReport = { goal: string; pending: string }
 
 const BLOCK = /<<<CONTEXT-GUARD\s*([\s\S]*?)CONTEXT-GUARD>>>/g
 
-/** Reads the last CONTEXT-GUARD block from the model's answer. */
+/**
+ * Where this session's work log lives: ~/.claude/worklogs/<session id>.md, outside every
+ * project, so a log that names hosts or customers never lands in a repository. The separator
+ * follows the home path, so Windows gets C:\Users\…\.claude\worklogs\….md.
+ */
+export function worklogPath(home: string, sessionId: string): string {
+  const sep = home.includes('\\') ? '\\' : '/'
+  const root = home.replace(/[\\/]+$/, '')
+  return [root, '.claude', 'worklogs', `${sessionId}.md`].join(sep)
+}
+
+/** Reads the last CONTEXT-GUARD block from the model's answer; the log path is the guard's own. */
 export function parseReport(answer: string): LogReport | null {
   const blocks = [...answer.matchAll(BLOCK)]
   const body = blocks.at(-1)?.[1]
@@ -109,35 +120,36 @@ export function parseReport(answer: string): LogReport | null {
     const m = body.match(new RegExp(`^\\s*[-*]?\\s*${name}\\s*[:：]\\s*(.*)$`, 'm'))
     return (m?.[1] ?? '').trim().replace(/^`(.*)`$/, '$1').trim()
   }
-  const log = field('log')
-  if (!log.startsWith('/')) return null
-  return { log, goal: field('goal') || '（未给出）', pending: field('pending') || '（未给出）' }
+  return { goal: field('goal') || '（未給出）', pending: field('pending') || '（未給出）' }
 }
 
-export function logPrompt(nonce: string, percent: number | null): string {
+/** The sections every log carries, in this order; 恢復會話 comes last so the resume reads to the end. */
+export const LOG_SECTIONS = ['目標', '進度', '決策', '刻意不做的事', '死路', '剩餘事項', '恢復會話'] as const
+
+export function logPrompt(nonce: string, percent: number | null, logPath: string): string {
   const used = percent === null ? '' : `上下文已用 ${percent}%。`
   return [
-    `[context-guard:${nonce}] ${used}请调用 work-log-share skill，用交接模式为当前会话写工作日志：`,
-    '1. 保存到当前项目已有的日志目录，没有就用 logs/；',
-    '2. 恢复段用二级标题「## 恢复会话」；',
-    '3. 保存后 read-back，确认文件已经落盘；',
-    '4. 不要自己执行 /compact，本轮结束后 context-guard 会自动压缩。',
+    `[context-guard:${nonce}] ${used}請呼叫 work-log-share skill，用交接模式為目前的 session 寫工作日誌：`,
+    `1. 存到這個路徑（整份覆寫）：${logPath}`,
+    '   檔案已存在時（同一個 session 先前寫過），先讀舊內容，合併成一份完整日誌再覆寫；全檔只能有一個「## 恢復會話」。',
+    `2. 用這些二級標題，依序：${LOG_SECTIONS.map(s => `## ${s}`).join('、')}；沒有內容的段寫「無」，不要省略標題。`,
+    '3. 存檔後重新讀一次，確認檔案確實寫入磁碟。',
+    '4. 不要自己執行 /compact，本輪結束後 context-guard 會自動壓縮。',
     '',
-    '回复的最后，原样输出下面这个块（不放进代码块，尖括号保留），context-guard 靠它找到日志：',
+    '回覆的最後，原樣輸出下面這個區塊（不放進程式碼區塊，尖括號保留），context-guard 用它告訴壓縮摘要目前的目標：',
     '<<<CONTEXT-GUARD',
-    'log: <日志文件的绝对路径>',
-    'goal: <当前目标，一句话>',
-    'pending: <未完成项，用「；」分隔，没有就写「无」>',
+    'goal: <目前目標，一句話>',
+    'pending: <剩餘事項，用「；」分隔，沒有就寫「無」>',
     'CONTEXT-GUARD>>>',
   ].join('\n')
 }
 
-export function compactInstructions(report: LogReport): string {
+export function compactInstructions(report: LogReport, logPath: string): string {
   return [
-    `压缩前已写好工作日志，完整记录与恢复 prompt 都在：${report.log}`,
-    `当前目标：${report.goal}`,
-    `未完成项：${report.pending}`,
-    '摘要里必须原样保留上面这个日志的绝对路径，并写明：需要细节或恢复上下文时，先读该日志的恢复节。',
+    `壓縮前已寫好工作日誌，完整記錄與恢復 prompt 都在：${logPath}`,
+    `目前目標：${report.goal}`,
+    `剩餘事項：${report.pending}`,
+    '摘要裡必須原樣保留上面這個日誌的絕對路徑，並寫明：需要細節或恢復上下文時，先讀該日誌的「## 恢復會話」段。',
   ].join('\n')
 }
 
@@ -150,19 +162,19 @@ export function isCompactUnavailable(error: string): boolean {
 }
 
 const RESUME_TAIL =
-  '（context-guard 在压缩后自动发出）恢复上下文后，先用几句话确认你掌握的当前状态和下一步，然后直接按原计划继续执行未完成项，不要停下来等我。只有原计划已经全部完成、或下一步必须由我拍板时，才停下等我的指令。'
+  '（context-guard 在壓縮後自動發出）恢復上下文後，先用幾句話確認你掌握的當前狀態和下一步，然後直接按原計畫繼續執行剩餘事項，不要停下來等我。只有原計畫已經全部完成、或下一步必須由我拍板時，才停下等我的指令。'
 
-const PASTE_NOTE = /粘贴|\/clear/
+const PASTE_NOTE = /貼上|粘贴|\/clear/
 
 /**
- * The prompt sent after a compaction: the log's own 恢复会话 section as written (without the
+ * The prompt sent after a compaction: the log's own 恢復會話 section as written (without the
  * "paste this after /clear" note that opens it), or a pointer to it when the section is missing.
  * Quotes elsewhere in the section are the log's own words and stay, and a heading inside a
  * code block does not end the section.
  */
 export function resumePrompt(logText: string | null, logPath: string): string {
   const lines = (logText ?? '').split('\n')
-  const start = lines.findIndex(l => /^#{2,3}\s*恢复会话/.test(l))
+  const start = lines.findIndex(l => /^#{2,3}\s*(恢復會話|恢复会话)/.test(l))
   let body = ''
   if (start !== -1) {
     const rest = lines.slice(start + 1)
@@ -179,14 +191,18 @@ export function resumePrompt(logText: string | null, logPath: string): string {
       .join('\n')
       .trim()
   }
-  if (body === '') body = `请阅读工作日志 ${logPath} 末尾的「恢复会话」节，按它恢复上下文。`
+  if (body === '') body = `請閱讀工作日誌 ${logPath} 末尾的「恢復會話」節，照它恢復上下文。`
   return `${body}\n\n${RESUME_TAIL}`
 }
 
-/** A file:// link for the band, the path's spaces and brackets escaped for markdown. */
+/**
+ * A file:// link for the band, the path's spaces and brackets escaped for markdown. A Windows
+ * drive path (C:\…) becomes file:///C:/….
+ */
 export function fileLink(path: string): string {
-  const name = (path.split('/').at(-1) ?? path).replace(/[[\]]/g, '\\$&')
-  const href = encodeURI(`file://${path}`).replace(/\(/g, '%28').replace(/\)/g, '%29')
+  const name = (path.split(/[\\/]/).at(-1) ?? path).replace(/[[\]]/g, '\\$&')
+  const url = /^[A-Za-z]:[\\/]/.test(path) ? `file:///${path.replace(/\\/g, '/')}` : `file://${path}`
+  const href = encodeURI(url).replace(/\(/g, '%28').replace(/\)/g, '%29')
   return `[${name}](${href})`
 }
 
@@ -216,7 +232,7 @@ export function parseCommand(args: string): Command {
     case 'threshold': {
       const value = Number(arg)
       if (!Number.isInteger(value) || value < 1 || value > 99) {
-        return { kind: 'error', text: '阈值要是 1 到 99 之间的整数，例如 /context-guard threshold 75' }
+        return { kind: 'error', text: '門檻要是 1 到 99 之間的整數，例如 /context-guard threshold 75' }
       }
       return { kind: 'threshold', value }
     }

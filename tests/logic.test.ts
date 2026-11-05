@@ -13,6 +13,9 @@ import {
   parseReport,
   readingOf,
   tiersFor,
+  worklogPath,
+  logPrompt,
+  LOG_SECTIONS,
 } from '../hooks/logic'
 
 describe('tiers', () => {
@@ -56,7 +59,7 @@ describe('readings', () => {
     expect(applyReading(v, 77, 75).isNewTier).toBe(true)
   })
 
-  test('「稍后」 hides the band until the next tier', () => {
+  test('「稍後」 hides the band until the next tier', () => {
     let v = applyReading(EMPTY_VIEW, 78, 75).view
     expect(isReminderShown(v, DEFAULT_SETTINGS)).toBe(true)
     v = { ...v, dismissedTier: v.tier }
@@ -73,38 +76,61 @@ describe('readings', () => {
 
 describe('report', () => {
   const answer = [
-    '日志写好了。',
+    '日誌寫好了。',
     '<<<CONTEXT-GUARD',
     'log: /home/user/project/logs/2026-10-09-a.md',
     'goal：做完 context-guard',
-    'pending: 装到 user scope；终端实测',
+    'pending: 裝到 user scope；終端實測',
     'CONTEXT-GUARD>>>',
   ].join('\n')
 
   test('reads the block', () => {
     expect(parseReport(answer)).toEqual({
-      log: '/home/user/project/logs/2026-10-09-a.md',
       goal: '做完 context-guard',
-      pending: '装到 user scope；终端实测',
+      pending: '裝到 user scope；終端實測',
     })
   })
 
   test('takes the last block and strips backticks', () => {
-    const two = `${answer}\n<<<CONTEXT-GUARD\nlog: \`/tmp/b.md\`\nCONTEXT-GUARD>>>`
-    expect(parseReport(two)?.log).toBe('/tmp/b.md')
+    const two = `${answer}\n<<<CONTEXT-GUARD\ngoal: \`第二塊\`\nCONTEXT-GUARD>>>`
+    expect(parseReport(two)?.goal).toBe('第二塊')
   })
 
-  test('no block or a relative path is no report', () => {
-    expect(parseReport('写好了')).toBe(null)
-    expect(parseReport('<<<CONTEXT-GUARD\nlog: logs/a.md\nCONTEXT-GUARD>>>')).toBe(null)
+  test('no block is no report; a missing field reads 未給出', () => {
+    expect(parseReport('寫好了')).toBe(null)
+    expect(parseReport('<<<CONTEXT-GUARD\nCONTEXT-GUARD>>>')).toEqual({ goal: '（未給出）', pending: '（未給出）' })
   })
 
-  test('the compaction names the log path', () => {
+  test('the compaction names the log path the guard chose', () => {
     const r = parseReport(answer)
     expect(r).not.toBe(null)
-    if (r) expect(compactInstructions(r)).toContain(r.log)
+    if (r) expect(compactInstructions(r, '/home/user/.claude/worklogs/s1.md')).toContain('/home/user/.claude/worklogs/s1.md')
   })
 })
+
+describe('worklog path', () => {
+  test('POSIX home', () => {
+    expect(worklogPath('/home/user', 's1')).toBe('/home/user/.claude/worklogs/s1.md')
+    expect(worklogPath('/home/user/', 's1')).toBe('/home/user/.claude/worklogs/s1.md')
+  })
+
+  test('Windows home keeps backslashes', () => {
+    expect(worklogPath(String.raw`C:\Users\me`, 's1')).toBe(String.raw`C:\Users\me\.claude\worklogs\s1.md`)
+    expect(worklogPath('C:\\Users\\me\\', 's1')).toBe(String.raw`C:\Users\me\.claude\worklogs\s1.md`)
+  })
+
+  test('the log prompt names the path and every section in order', () => {
+    const text = logPrompt('n1', 80, '/home/user/.claude/worklogs/s1.md')
+    expect(text).toContain('/home/user/.claude/worklogs/s1.md')
+    expect(text).toContain(LOG_SECTIONS.map(s => `## ${s}`).join('、'))
+    expect(text).not.toContain('log:')
+  })
+
+  test('a Windows drive path links as file:///C:/…, named after the last separator', () => {
+    expect(fileLink(String.raw`C:\Users\me\.claude\worklogs\s1.md`)).toBe('[s1.md](file:///C:/Users/me/.claude/worklogs/s1.md)')
+  })
+})
+
 
 describe('command', () => {
   test('parses each form', () => {
@@ -135,50 +161,50 @@ describe('compaction refusals', () => {
 
 describe('resume', () => {
   const log = [
-    '# 日志',
-    '## 总结',
+    '# 日誌',
+    '## 總結',
     '做完了一半',
-    '## 恢复会话',
+    '## 恢復會話',
     '',
-    '> 下次 `/clear` 后粘贴以下内容继续工作：',
+    '> 下次 `/clear` 後貼上以下內容繼續工作：',
     '',
-    '请阅读工作日志 /a/b.md 继续工作。',
-    '下一步任务：',
-    '- 写 README',
+    '請閱讀工作日誌 /a/b.md 繼續工作。',
+    '下一步任務：',
+    '- 寫 README',
   ].join('\n')
 
   test('sends the recovery section as written, without the paste note', () => {
     const text = resumePrompt(log, '/a/b.md')
-    expect(text.startsWith('请阅读工作日志 /a/b.md 继续工作。\n下一步任务：\n- 写 README')).toBe(true)
-    expect(text).not.toContain('粘贴以下内容')
+    expect(text.startsWith('請閱讀工作日誌 /a/b.md 繼續工作。\n下一步任務：\n- 寫 README')).toBe(true)
+    expect(text).not.toContain('貼上以下內容')
     expect(text).not.toContain('做完了一半')
-    expect(text).toContain('按原计划继续执行未完成项')
-    expect(text).not.toContain('等我的下一条指令')
+    expect(text).toContain('按原計畫繼續執行剩餘事項')
+    expect(text).not.toContain('等我的下一條指令')
   })
 
   test('keeps the quoted lines that are the log\'s own words', () => {
-    const text = resumePrompt(`${log}\n> 约束：不要动 main 分支，只在 dev 上提交`, '/a/b.md')
-    expect(text).toContain('> 约束：不要动 main 分支，只在 dev 上提交')
-    expect(text).not.toContain('粘贴以下内容')
+    const text = resumePrompt(`${log}\n> 約束：不要動 main 分支，只在 dev 上提交`, '/a/b.md')
+    expect(text).toContain('> 約束：不要動 main 分支，只在 dev 上提交')
+    expect(text).not.toContain('貼上以下內容')
   })
 
   test('a heading inside a code block does not end the section', () => {
-    const text = resumePrompt(`${log}\n\`\`\`bash\n# 先跑测试\nnpm test\n\`\`\`\n- 再提交`, '/a/b.md')
-    expect(text).toContain('# 先跑测试')
+    const text = resumePrompt(`${log}\n\`\`\`bash\n# 先跑測試\nnpm test\n\`\`\`\n- 再提交`, '/a/b.md')
+    expect(text).toContain('# 先跑測試')
     expect(text).toContain('- 再提交')
   })
 
   test('stops at the next section', () => {
-    expect(resumePrompt(`${log}\n## 附录\n别带上我`, '/a/b.md')).not.toContain('别带上我')
+    expect(resumePrompt(`${log}\n## 附錄\n別帶上我`, '/a/b.md')).not.toContain('別帶上我')
   })
 
   test('points at the log when the section is missing or unreadable', () => {
-    expect(resumePrompt('# 只有标题', '/a/b.md')).toContain('/a/b.md')
-    expect(resumePrompt(null, '/a/b.md')).toContain('「恢复会话」')
+    expect(resumePrompt('# 只有標題', '/a/b.md')).toContain('/a/b.md')
+    expect(resumePrompt(null, '/a/b.md')).toContain('「恢復會話」')
   })
 
   test('the band link escapes spaces and brackets', () => {
-    expect(fileLink('/x/2026 日志 (a).md')).toBe('[2026 日志 (a).md](file:///x/2026%20%E6%97%A5%E5%BF%97%20%28a%29.md)')
+    expect(fileLink('/x/2026 日誌 (a).md')).toBe('[2026 日誌 (a).md](file:///x/2026%20%E6%97%A5%E8%AA%8C%20%28a%29.md)')
   })
 })
 

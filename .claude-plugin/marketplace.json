@@ -1,7 +1,7 @@
 {
-  "name": "axtonliu-mods",
+  "name": "jammy912-mods",
   "owner": {
-    "name": "Axton Liu"
+    "name": "jammy912"
   },
   "plugins": [
     {
@@ -9,5 +9,5 @@
       "source": "./"
     }
   ],
-  "description": "Claude Code mods by Axton Liu"
+  "description": "Traditional Chinese fork of axtonliu/context-guard"
 }

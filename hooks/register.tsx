@@ -18,6 +18,7 @@ import {
   readingOf,
   resumePrompt,
   tiersFor,
+  worklogPath,
 } from './logic'
 
 const view = atom({ plugin: 'context-guard', key: 'view' } as const, EMPTY_VIEW)
@@ -69,7 +70,7 @@ async function takeReading($: $): Promise<void> {
   })
   const v = await read($, view)
   if (isDue && s.isEnabled && v.phase === 'idle') {
-    $.ui.toast(`上下文已用 ${v.percent}%，做完当前任务后建议写日志并压缩`, { timeoutMs: 8000 })
+    $.ui.toast(`上下文已用 ${v.percent}%，做完目前的任務後建議寫日誌並壓縮`, { timeoutMs: 8000 })
   }
 }
 
@@ -92,9 +93,26 @@ async function isCurrent($: $, nonce: string | null): Promise<boolean> {
   return nonce !== null && (await read($, view)).nonce === nonce
 }
 
+/**
+ * This session's log: ~/.claude/worklogs/<session id>.md. USERPROFILE comes first, as on
+ * Windows HOME may be unset or a Git Bash path (/c/Users/…); elsewhere it is unset and HOME
+ * answers.
+ */
+async function sessionLogPath($: $): Promise<string | null> {
+  const id = await $.session.id().catch(() => undefined)
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+  if (id === undefined || id === '' || home === undefined || home === '') return null
+  return worklogPath(home, id)
+}
+
 async function startLogging($: $): Promise<void> {
   const v = await read($, view)
   if (v.phase !== 'idle') return
+  const logPath = await sessionLogPath($)
+  if (logPath === null) {
+    await fail($, '取不到 session id 或家目錄，無法決定日誌路徑，未壓縮')
+    return
+  }
   const nonce = newNonce()
   const pressedAt = await $.clock.now()
   await update($, view, old => ({
@@ -103,34 +121,40 @@ async function startLogging($: $): Promise<void> {
     nonce,
     pressedAt,
     logTurnId: null,
+    logPath,
     message: null,
     isError: false,
     instructions: null,
     isQueued: false,
   }))
-  await note($, `press: nonce=${nonce}`)
+  await note($, `press: nonce=${nonce} log=${logPath}`)
   try {
-    const sent = await $.prompt.submit({ text: logPrompt(nonce, v.percent) })
+    const sent = await $.prompt.submit({ text: logPrompt(nonce, v.percent, logPath) })
     await note($, `prompt.submit resolved${sent.drop !== undefined ? ` drop=${sent.drop}` : ''}`)
-    if (sent.drop !== undefined && (await isCurrent($, nonce))) await fail($, `写日志的消息被拦下：${sent.drop}`)
+    if (sent.drop !== undefined && (await isCurrent($, nonce))) await fail($, `寫日誌的訊息被攔下：${sent.drop}`)
   } catch (err) {
-    if (await isCurrent($, nonce)) await fail($, `写日志的消息没有发出去：${String(err)}`)
+    if (await isCurrent($, nonce)) await fail($, `寫日誌的訊息沒有發出去：${String(err)}`)
   }
 }
 
 /** Checks the log turn's answer and the file on disk; only then queues the compaction. */
 async function finishLogging($: $, answer: string, isAnswered: boolean): Promise<void> {
   if (!isAnswered) {
-    await fail($, '写日志那一轮没有正常结束，未压缩')
+    await fail($, '寫日誌那一輪沒有正常結束，未壓縮')
     return
   }
   const report = parseReport(answer)
   if (report === null) {
-    await fail($, '回复里没找到 CONTEXT-GUARD 块，不知道日志在哪，未压缩')
+    await fail($, '回覆裡沒找到 CONTEXT-GUARD 區塊，未壓縮')
     return
   }
   const v = await read($, view)
-  const stat = await $.fs.stat(report.log).catch(async (err: unknown) => {
+  const logPath = v.logPath
+  if (logPath === null) {
+    await fail($, '流程裡沒有日誌路徑，未壓縮')
+    return
+  }
+  const stat = await $.fs.stat(logPath).catch(async (err: unknown) => {
     await note($, `fs.stat failed: ${String(err)}`)
     return undefined
   })
@@ -138,13 +162,13 @@ async function finishLogging($: $, answer: string, isAnswered: boolean): Promise
     await note($, 'cancelled while the log was checked')
     return
   }
-  await note($, `fs.stat ${report.log}: ${stat === undefined ? 'none' : `${stat.kind} mtime=${stat.mtimeMs} pressedAt=${v.pressedAt}`}`)
+  await note($, `fs.stat ${logPath}: ${stat === undefined ? 'none' : `${stat.kind} mtime=${stat.mtimeMs} pressedAt=${v.pressedAt}`}`)
   if (stat === undefined || stat.kind !== 'file') {
-    await fail($, `日志文件不存在：${report.log}，未压缩`)
+    await fail($, `日誌檔案不存在：${logPath}，未壓縮`)
     return
   }
   if (v.pressedAt !== null && stat.mtimeMs < v.pressedAt - MTIME_SLACK_MS) {
-    await fail($, `日志文件不是这次写的（修改时间早于点击）：${report.log}，未压缩`)
+    await fail($, `日誌檔案不是這次寫的（修改時間早於按下按鈕）：${logPath}，未壓縮`)
     return
   }
   // The nonce stays: it names this flow until it ends, so a 取消 can be told from it.
@@ -152,8 +176,7 @@ async function finishLogging($: $, answer: string, isAnswered: boolean): Promise
     ...old,
     phase: 'compacting' as const,
     logTurnId: null,
-    logPath: report.log,
-    instructions: compactInstructions(report),
+    instructions: compactInstructions(report, logPath),
     isQueued: false,
   }))
   await note($, 'log verified, compaction pending')
@@ -196,7 +219,7 @@ async function tryCompact($: $, instructions: string, nonce: string | null): Pro
     if (why !== lastRefusal) {
       lastRefusal = why
       await note($, `compact refused (${refusals}): ${why}`)
-      await update($, view, old => ({ ...old, message: `压缩暂未执行，等会话空闲后重试：${why}` }))
+      await update($, view, old => ({ ...old, message: `壓縮暫未執行，等會話空閒後重試：${why}` }))
     }
     if (refusals === FALLBACK_AFTER || (isCompactUnavailable(why) && refusals === 1)) {
       await note($, 'falling back to /compact through $.command.run')
@@ -205,10 +228,10 @@ async function tryCompact($: $, instructions: string, nonce: string | null): Pro
       // automatic compaction that may come first.
       refusals = 0
       lastRefusal = ''
-      await update($, view, old => ({ ...old, isQueued: true, message: '改用 /compact 排队执行，会话空闲时开始' }))
+      await update($, view, old => ({ ...old, isQueued: true, message: '改用 /compact 排隊執行，會話空閒時開始' }))
       // Settles once the queued /compact has run; the session.compact hook records the outcome.
       void $.command.run({ command: 'compact', args: instructions }).catch(async (e: unknown) => {
-        if (await isCurrent($, nonce)) await fail($, `/compact 也没能执行：${String(e)}`)
+        if (await isCurrent($, nonce)) await fail($, `/compact 也沒能執行：${String(e)}`)
       })
     }
     return
@@ -219,12 +242,12 @@ async function tryCompact($: $, instructions: string, nonce: string | null): Pro
     // 取消 came while the compaction ran: it stands, but the flow stops here.
     if (result.skip === undefined) {
       await note($, 'compacted after 取消, no resume')
-      await update($, view, old => ({ ...old, message: '取消时压缩已经开始，已压缩完成；不会自动发恢复 prompt', isError: false }))
+      await update($, view, old => ({ ...old, message: '取消時壓縮已經開始，已壓縮完成；不會自動發恢復 prompt', isError: false }))
     }
     return
   }
   if (result.skip !== undefined) {
-    await fail($, `压缩被跳过：${result.skip}`)
+    await fail($, `壓縮被跳過：${result.skip}`)
     return
   }
   await finishCompact($, result.tokensBefore, result.tokensAfter)
@@ -239,10 +262,10 @@ async function finishCompact($: $, before?: number, after?: number): Promise<voi
     ...EMPTY_VIEW,
     trace: old.trace,
     logPath: old.logPath,
-    message: `已压缩${sizes}${willResume ? '，已发出恢复 prompt' : ''}。日志：${old.logPath ?? '（未知）'}`,
+    message: `已壓縮${sizes}${willResume ? '，已發出恢復 prompt' : ''}。日誌：${old.logPath ?? '（未知）'}`,
     isError: false,
   }))
-  $.ui.toast(`context-guard：已写日志并压缩${sizes}`, { timeoutMs: 6000 })
+  $.ui.toast(`context-guard：已寫日誌並壓縮${sizes}`, { timeoutMs: 6000 })
   if (willResume) await sendResume($, logPath)
 }
 
@@ -273,7 +296,7 @@ async function cancel($: $): Promise<void> {
     nonce: null,
     logTurnId: null,
     isQueued: false,
-    message: old.isQueued === true ? '已取消：排队的 /compact 撤不回，仍会在会话空闲时执行，但压缩后不会自动发恢复 prompt' : null,
+    message: old.isQueued === true ? '已取消：排隊的 /compact 撤不回，仍會在會話空閒時執行，但壓縮後不會自動發恢復 prompt' : null,
     isError: false,
   }))
   await note($, 'cancelled')
@@ -285,19 +308,19 @@ async function statusText($: $): Promise<string> {
   const r = await currentReading($)
   const used =
     r.percent === undefined
-      ? '暂无读数（新会话或刚压缩，等下一次回复）'
-      : `${r.percent}%（${r.tokens ?? '?'} / ${r.window} tokens，${r.isCompactWindow ? '按自动压缩窗口' : '按模型窗口'}）`
+      ? '暫無讀數（新會話或剛壓縮，等下一次回覆）'
+      : `${r.percent}%（${r.tokens ?? '?'} / ${r.window} tokens，${r.isCompactWindow ? '按自動壓縮視窗' : '按模型視窗'}）`
   return [
-    `context-guard：${s.isEnabled ? '开启' : '关闭'}`,
-    `当前占用：${used}`,
-    `阈值：${s.threshold}%，提醒档位：${tiersFor(s.threshold).join('% / ')}%`,
-    `已提醒到：${v.notifiedTier === null ? '无' : `${v.notifiedTier}%`}；阶段：${v.phase}`,
-    `压缩后自动发恢复 prompt：${s.autoResume ? '开' : '关'}`,
-    `自动压缩拦截：${s.interceptAuto ? `开（本会话${(await read($, autoSkipped)) ? '已拦过一次' : '尚未拦截'}）` : '关'}`,
-    v.logPath === null ? '' : `上次日志：${v.logPath}`,
+    `context-guard：${s.isEnabled ? '開啟' : '關閉'}`,
+    `目前佔用：${used}`,
+    `門檻：${s.threshold}%，提醒級距：${tiersFor(s.threshold).join('% / ')}%`,
+    `已提醒到：${v.notifiedTier === null ? '無' : `${v.notifiedTier}%`}；階段：${v.phase}`,
+    `壓縮後自動發恢復 prompt：${s.autoResume ? '開' : '關'}`,
+    `自動壓縮攔截：${s.interceptAuto ? `開（本會話${(await read($, autoSkipped)) ? '已攔過一次' : '尚未攔截'}）` : '關'}`,
+    v.logPath === null ? '' : `上次日誌：${v.logPath}`,
     v.phase === 'idle' ? '' : `流程：nonce=${v.nonce} logTurnId=${v.logTurnId} pressedAt=${v.pressedAt}`,
     v.message === null ? '' : `提示：${v.message}`,
-    (v.trace ?? []).length === 0 ? '' : `轨迹：\n${(v.trace ?? []).join('\n')}`,
+    (v.trace ?? []).length === 0 ? '' : `軌跡：\n${(v.trace ?? []).join('\n')}`,
     USAGE,
   ]
     .filter(Boolean)
@@ -310,7 +333,7 @@ export const register: Register = on => {
     await update($, settings, () => ({ ...DEFAULT_SETTINGS, ...(stored ?? {}) }))
     await $.command.register({
       name: 'context-guard',
-      description: '查看上下文占用与提醒阈值，或调整：threshold <数字> | on | off',
+      description: '檢視上下文佔用與提醒門檻，或調整：threshold <數字> | on | off',
       argumentHint: '[threshold <1-99> | on | off | intercept on|off | resume on|off | reset]',
       immediate: true,
     })
@@ -333,25 +356,25 @@ export const register: Register = on => {
         // Tiers start over under the new threshold, and the band reflects it now.
         await update($, view, v => ({ ...v, notifiedTier: null, dismissedTier: null }))
         await takeReading($)
-        return { text: `阈值改为 ${cmd.value}%，提醒档位：${tiersFor(cmd.value).join('% / ')}%` }
+        return { text: `門檻改為 ${cmd.value}%，提醒級距：${tiersFor(cmd.value).join('% / ')}%` }
       case 'enable':
         await saveSettings($, { ...s, isEnabled: cmd.isEnabled })
         if (cmd.isEnabled) await takeReading($)
-        return { text: cmd.isEnabled ? 'context-guard 已开启' : 'context-guard 已关闭（不再提醒，命令仍可用）' }
+        return { text: cmd.isEnabled ? 'context-guard 已開啟' : 'context-guard 已關閉（不再提醒，命令仍可用）' }
       case 'intercept':
         await saveSettings($, { ...s, interceptAuto: cmd.isOn })
         return {
           text: cmd.isOn
-            ? '已开启：每个会话的第一次自动压缩会被跳过一次，留时间写日志；第二次照常压缩'
-            : '已关闭自动压缩拦截'
+            ? '已開啟：每個會話的第一次自動壓縮會被跳過一次，留時間寫日誌；第二次照常壓縮'
+            : '已關閉自動壓縮攔截'
         }
       case 'resume':
         await saveSettings($, { ...s, autoResume: cmd.isOn })
-        return { text: cmd.isOn ? '已开启：压缩后自动发出日志里的恢复 prompt' : '已关闭：压缩后不再自动发恢复 prompt' }
+        return { text: cmd.isOn ? '已開啟：壓縮後自動發出日誌裡的恢復 prompt' : '已關閉：壓縮後不再自動發恢復 prompt' }
       case 'reset':
         await update($, view, () => EMPTY_VIEW)
         await takeReading($)
-        return { text: 'context-guard 状态已重置' }
+        return { text: 'context-guard 狀態已重置' }
     }
   })
 
@@ -389,17 +412,17 @@ export const register: Register = on => {
     if (e.trigger === 'auto' && flow.phase === 'logging') {
       // Compacting now would cut the log turn short; once it ends, the compaction carries the log.
       await note($, 'automatic compaction skipped while the log is written')
-      return { skip: 'context-guard 正在写工作日志，先跳过这次自动压缩，日志写完会自动压缩' }
+      return { skip: 'context-guard 正在寫工作日誌，先跳過這次自動壓縮，日誌寫完會自動壓縮' }
     }
     if (e.trigger === 'auto' && s.interceptAuto && s.isEnabled && !(await read($, autoSkipped))) {
       // Once per session only, so a full context still compacts on the next try.
       await update($, autoSkipped, () => true)
       await update($, view, old => ({
         ...old,
-        message: '已拦下一次自动压缩：建议现在点「写日志并压缩」；下一次自动压缩不会再拦',
+        message: '已攔下一次自動壓縮：建議現在點「寫日誌並壓縮」；下一次自動壓縮不會再攔',
         isError: true,
       }))
-      return { skip: 'context-guard 拦下了这次自动压缩，先写日志再压缩（只拦一次）' }
+      return { skip: 'context-guard 攔下了這次自動壓縮，先寫日誌再壓縮（只攔一次）' }
     }
     // An automatic compaction while ours is pending does its job: it tells the summarizer about the log.
     const isPending = e.trigger === 'auto' && flow.phase === 'compacting' && flow.instructions !== null
@@ -416,7 +439,7 @@ export const register: Register = on => {
         ...EMPTY_VIEW,
         trace: old.trace,
         logPath: old.logPath,
-        message: old.phase === 'idle' ? old.message : '会话已被其他方式压缩，本次流程结束',
+        message: old.phase === 'idle' ? old.message : '會話已被其他方式壓縮，本次流程結束',
         isError: false,
       }))
     }
@@ -434,13 +457,13 @@ export const register: Register = on => {
         <Box flexDirection="row" gap={1}>
           <Text color="warning">
             {v.phase === 'logging'
-              ? 'context-guard：正在写工作日志，这一轮结束后自动压缩'
+              ? 'context-guard：正在寫工作日誌，這一輪結束後自動壓縮'
               : v.isQueued === true
-                ? 'context-guard：日志已落盘，/compact 已排队，会话空闲时执行（已撤不回）'
-                : 'context-guard：日志已落盘，正在压缩'}
+                ? 'context-guard：日誌已寫入磁碟，/compact 已排隊，會話空閒時執行（已撤不回）'
+                : 'context-guard：日誌已寫入磁碟，正在壓縮'}
             {v.phase === 'compacting' && v.isQueued !== true && v.message !== null ? `（${v.message}）` : ''}
           </Text>
-          <Button key="cancel" label={v.isQueued === true ? '不要自动恢复' : '取消'} dimColor onPress={() => cancel($)} />
+          <Button key="cancel" label={v.isQueued === true ? '不要自動恢復' : '取消'} dimColor onPress={() => cancel($)} />
         </Box>
       )
     }
@@ -463,10 +486,10 @@ export const register: Register = on => {
         {isReminder && (
           <Box flexDirection="row" gap={1}>
             <Text color="warning" bold>
-              上下文已用 {v.percent}%，做完当前任务后建议写日志并压缩
+              上下文已用 {v.percent}%，做完目前的任務後建議寫日誌並壓縮
             </Text>
-            <Button key="log-and-compact" label="写日志并压缩" variant="primary" onPress={() => void startLogging($)} />
-            <Button key="later" label="稍后" dimColor onPress={() => update($, view, old => ({ ...old, dismissedTier: old.tier }))} />
+            <Button key="log-and-compact" label="寫日誌並壓縮" variant="primary" onPress={() => void startLogging($)} />
+            <Button key="later" label="稍後" dimColor onPress={() => update($, view, old => ({ ...old, dismissedTier: old.tier }))} />
           </Box>
         )}
       </Box>

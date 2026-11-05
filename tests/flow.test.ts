@@ -1,7 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-const LOG = '/home/user/project/logs/2026-10-09-demo.md'
+// The guard names the log itself: ~/.claude/worklogs/<session id>.md.
+const SESSION_ID = 'sess-0001'
+const LOG = `/home/user/.claude/worklogs/${SESSION_ID}.md`
 
 const BAND = {
   component: 'AbovePrompt',
@@ -15,7 +17,7 @@ const BAND = {
   },
 } as const
 
-const RECOVERY_LOG = '# 日志\n## 恢复会话\n> 下次粘贴以下内容：\n请阅读工作日志 Demo 继续工作。\n'
+const RECOVERY_LOG = '# 日誌\n## 恢復會話\n> 下次貼上以下內容：\n請閱讀工作日誌 Demo 繼續工作。\n'
 
 type World = { percent: number; submitted: string[]; compacted: string[]; mtimeMs: number; isFile: boolean; busyFor: number; isSdk: boolean; queued: string[]; attempts: number; logText: string; compactWindow?: number }
 
@@ -54,6 +56,9 @@ function world(on: On, start: Partial<World> = {}): World {
     w.percent = 10
     return { messages: [{ role: 'user' as const, text: 'summary', toolUses: [] }], tokensBefore: 800, tokensAfter: 100 }
   })
+  on('session.id' as never, (() => ({ value: SESSION_ID })) as never)
+  // A POSIX host: USERPROFILE unset, HOME answers.
+  on('env.get' as never, ((_$: unknown, e: { name: string }) => ({ value: e.name === 'HOME' ? '/home/user' : undefined })) as never)
   on('fs.read' as never, (() => ({ value: w.logText })) as never)
   on('fs.stat', () => {
     if (!w.isFile) throw new Error('ENOENT')
@@ -89,7 +94,7 @@ const done = (turnId: string, answer = '') =>
   ({ answer, durationMs: 1, isAborted: false, turnId, reason: 'answer' }) as const
 
 const reportFor = (log: string) =>
-  `日志写好了。\n<<<CONTEXT-GUARD\nlog: ${log}\ngoal: 做完 context-guard\npending: 装到 user scope\nCONTEXT-GUARD>>>`
+  `日誌寫好了。\n<<<CONTEXT-GUARD\nlog: ${log}\ngoal: 做完 context-guard\npending: 裝到 user scope\nCONTEXT-GUARD>>>`
 
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`reminder → button → log → compact on ${surface}`, async ($, on) => {
@@ -106,7 +111,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const text = w.submitted[0] ?? ''
     expect(text).toContain('work-log-share')
     expect(text).toContain('<<<CONTEXT-GUARD')
-    expect(await ui.find({ type: 'Text', text: '正在写工作日志' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '正在寫工作日誌' })).toBeDefined()
 
     await $.turn.start({ text, turnId: 't1' })
     await $.turn.complete(done('t1', reportFor(LOG)))
@@ -116,13 +121,13 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(w.compacted.length).toBe(1)
     expect(w.compacted[0]).toContain(LOG)
     expect(w.compacted[0]).toContain('做完 context-guard')
-    expect(await ui.find({ type: 'Markdown', text: '已压缩' })).toBeDefined()
+    expect(await ui.find({ type: 'Markdown', text: '已壓縮' })).toBeDefined()
     expect(await ui.find({ type: 'Markdown', text: 'file:///home/user' })).toBeDefined()
     // The log's recovery prompt goes out as the next message.
     await clock.settle()
     expect(w.submitted.length).toBe(2)
-    expect(w.submitted[1]).toContain('请阅读工作日志 Demo 继续工作。')
-    expect(w.submitted[1]).not.toContain('粘贴以下内容')
+    expect(w.submitted[1]).toContain('請閱讀工作日誌 Demo 繼續工作。')
+    expect(w.submitted[1]).not.toContain('貼上以下內容')
     await ui.unmount()
   })
 }
@@ -138,7 +143,7 @@ test('no compaction when the log file is missing', async ($, on) => {
   await $.turn.complete(done('t1', reportFor(LOG)))
   await clock.advance(3000)
   expect(w.compacted.length).toBe(0)
-  expect(await ui.find({ type: 'Text', text: '日志文件不存在' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '日誌檔案不存在' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -150,7 +155,7 @@ test('no compaction without the report block', async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'context-guard', surface: 'terminal', ...BAND })
   await ui.press({ key: 'log-and-compact' })
   await $.turn.start({ text: w.submitted[0] ?? '', turnId: 't1' })
-  await $.turn.complete(done('t1', '写好了'))
+  await $.turn.complete(done('t1', '寫好了'))
   await clock.advance(3000)
   expect(w.compacted.length).toBe(0)
   await ui.unmount()
@@ -174,7 +179,7 @@ test('threshold, off and on through the command', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: '上下文已用 30%' })).toBeDefined()
 
   const status = await run($, '')
-  expect(status.text).toContain('阈值：20%')
+  expect(status.text).toContain('門檻：20%')
   expect(w.compacted.length).toBe(0)
   await ui.unmount()
 })
@@ -194,7 +199,7 @@ test('intercept on skips only the first automatic compaction', async ($, on) => 
   await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
   await run($, 'intercept on')
   const auto = { trigger: 'auto', messages: [] } as never
-  expect((await $.session.compact(auto)).skip).toContain('只拦一次')
+  expect((await $.session.compact(auto)).skip).toContain('只攔一次')
   expect(w.compacted.length).toBe(0)
   expect((await $.session.compact(auto)).skip).toBeUndefined()
   expect(w.compacted.length).toBe(1)
@@ -213,7 +218,7 @@ test('a refused compaction is retried on the next tick', async ($, on) => {
   expect(w.compacted.length).toBe(0)
   await clock.advance(6000)
   expect(w.compacted.length).toBe(1)
-  expect(await ui.find({ type: 'Markdown', text: '已压缩' })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown', text: '已壓縮' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -239,7 +244,7 @@ test('a session that keeps refusing hands the compaction to /compact', async ($,
   // The queued /compact runs once the session is idle.
   await $.session.compact({ trigger: 'manual', instructions: w.queued[0], messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
   expect(w.compacted.length).toBe(1)
-  expect(await ui.find({ type: 'Markdown', text: '已压缩' })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown', text: '已壓縮' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -250,7 +255,7 @@ test('the band counts against the auto-compact window', async ($, on) => {
   await $.turn.complete(done('t0'))
   const ui = await $.ui.mount({ plugin: 'context-guard', surface: 'desktop', ...BAND })
   expect(await ui.find({ type: 'Text', text: '上下文已用 80%' })).toBeDefined()
-  expect((await run($, '')).text).toContain('按自动压缩窗口')
+  expect((await run($, '')).text).toContain('按自動壓縮視窗')
   expect(w.compacted.length).toBe(0)
   await ui.unmount()
 })
@@ -259,7 +264,7 @@ test('resume off sends nothing after the compaction', async ($, on) => {
   const clock = mock.clock(on, { now: 4000 })
   const w = world(on)
   await $.session.start({ cwd: '/tmp', surface: 'desktop', isInteractive: true })
-  expect((await run($, 'resume off')).text).toContain('不再自动')
+  expect((await run($, 'resume off')).text).toContain('不再自動')
   await $.turn.complete(done('t0'))
   const ui = await $.ui.mount({ plugin: 'context-guard', surface: 'desktop', ...BAND })
   await ui.press({ key: 'log-and-compact' })
@@ -294,7 +299,7 @@ test('an automatic compaction while the log is written is skipped', async ($, on
   await ui.press({ key: 'log-and-compact' })
   await $.turn.start({ text: w.submitted[0] ?? '', turnId: 't1' })
   const auto = await $.session.compact({ trigger: 'auto', messages: [] } as never)
-  expect(auto.skip).toContain('正在写工作日志')
+  expect(auto.skip).toContain('正在寫工作日誌')
   expect(w.compacted.length).toBe(0)
   // The log turn ends and the compaction runs with the log's path.
   await $.turn.complete(done('t1', reportFor(LOG)))
@@ -319,7 +324,7 @@ test('an automatic compaction after the log tells the summarizer about it', asyn
   expect(w.compacted.length).toBe(1)
   expect(w.compacted[0]).toContain(LOG)
   await clock.settle()
-  expect(await ui.find({ type: 'Markdown', text: '已压缩' })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown', text: '已壓縮' })).toBeDefined()
   expect(w.submitted.length).toBe(2)
   // The flow is over: the poller compacts nothing more.
   await clock.advance(3000)
@@ -360,7 +365,7 @@ test('取消 while a refused compaction waits stops the retries', async ($, on) 
   await clock.settle()
   expect(w.compacted.length).toBe(0)
   expect(w.submitted.length).toBe(1)
-  expect(await ui.find({ type: 'Text', text: '暂未执行' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '暫未執行' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -378,7 +383,7 @@ test('取消 after /compact is queued sends no recovery prompt', async ($, on) =
   // The band says the queued /compact cannot be withdrawn; the button only stops the resume.
   expect(await ui.find({ type: 'Text', text: '撤不回' })).toBeDefined()
   await ui.press({ key: 'cancel' })
-  expect(await ui.find({ type: 'Text', text: '不会自动发恢复 prompt' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '不會自動發恢復 prompt' })).toBeDefined()
   // The queued /compact still runs once the session is idle, as someone else's compaction.
   await $.session.compact({ trigger: 'manual', instructions: w.queued[0], messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
   await clock.settle()

@@ -9,7 +9,7 @@ export type GuardView = {
   tier: number | null
   /** The tier already toasted, so a tier is announced once. */
   notifiedTier: number | null
-  /** The tier the person dismissed with 「稍后」; the band stays hidden until a higher one. */
+  /** The tier the person dismissed with 「稍後」; the band stays hidden until a higher one. */
   dismissedTier: number | null
   phase: Phase
   /** The turn the log prompt started, matched at turn.complete. */
