@@ -463,7 +463,7 @@ export const register: Register = on => {
                 : 'context-guard：日誌已寫入磁碟，正在壓縮'}
             {v.phase === 'compacting' && v.isQueued !== true && v.message !== null ? `（${v.message}）` : ''}
           </Text>
-          <Button key="cancel" label={v.isQueued === true ? '不要自動恢復' : '取消'} dimColor onPress={() => cancel($)} />
+          <Button key="cancel" label={v.isQueued === true ? '不要自動恢復 (c)' : '取消 (c)'} hotkey="c" dimColor onPress={() => cancel($)} />
         </Box>
       )
     }
@@ -480,7 +480,7 @@ export const register: Register = on => {
             ) : (
               <Text color={v.isError ? 'error' : 'success'}>context-guard：{v.message}</Text>
             )}
-            <Button key="ok" label="知道了" dimColor onPress={() => update($, view, old => ({ ...old, message: null, isError: false }))} />
+            <Button key="ok" label="知道了 (k)" hotkey="k" dimColor onPress={() => update($, view, old => ({ ...old, message: null, isError: false }))} />
           </Box>
         )}
         {isReminder && (
@@ -488,8 +488,9 @@ export const register: Register = on => {
             <Text color="warning" bold>
               上下文已用 {v.percent}%，做完目前的任務後建議寫日誌並壓縮
             </Text>
-            <Button key="log-and-compact" label="寫日誌並壓縮" variant="primary" onPress={() => void startLogging($)} />
-            <Button key="later" label="稍後" dimColor onPress={() => update($, view, old => ({ ...old, dismissedTier: old.tier }))} />
+            <Text dimColor>（按 Ctrl+X 再按 Tab 聚焦這一列，然後按括號內的鍵）</Text>
+            <Button key="log-and-compact" label="寫日誌並壓縮 (w)" hotkey="w" variant="primary" onPress={() => void startLogging($)} />
+            <Button key="later" label="稍後 (l)" hotkey="l" dimColor onPress={() => update($, view, old => ({ ...old, dismissedTier: old.tier }))} />
           </Box>
         )}
       </Box>

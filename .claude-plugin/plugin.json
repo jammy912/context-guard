@@ -1,6 +1,6 @@
 {
   "name": "context-guard",
-  "version": "0.2.3-tw.3",
+  "version": "0.2.3-tw.4",
   "description": "Warns before the context fills up; one click writes a work log to ~/.claude/worklogs, compacts, then resumes from the log. 上下文快滿時提醒，一鍵寫日誌、壓縮、從日誌接著做。",
   "types": "./types/index.d.ts",
   "author": {

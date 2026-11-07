@@ -332,6 +332,21 @@ test('an automatic compaction after the log tells the summarizer about it', asyn
   await ui.unmount()
 })
 
+test('every band button has a hotkey and the reminder says how to reach it', async ($, on) => {
+  mock.clock(on, { now: 4000 })
+  const w = world(on)
+  await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+  await $.turn.complete(done('t0'))
+  const ui = await $.ui.mount({ plugin: 'context-guard', surface: 'terminal', ...BAND })
+  expect((await ui.find({ key: 'log-and-compact' }))?.props.hotkey).toBe('w')
+  expect((await ui.find({ key: 'later' }))?.props.hotkey).toBe('l')
+  expect(await ui.find({ type: 'Text', text: 'Ctrl+X 再按 Tab' })).toBeDefined()
+  await ui.press({ key: 'log-and-compact' })
+  expect(w.submitted.length).toBe(1)
+  expect((await ui.find({ key: 'cancel' }))?.props.hotkey).toBe('c')
+  await ui.unmount()
+})
+
 test('取消 while the log is written leaves the context alone', async ($, on) => {
   const clock = mock.clock(on, { now: 4000 })
   const w = world(on)

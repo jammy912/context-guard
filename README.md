@@ -28,7 +28,9 @@ On a long task, automatic compaction keeps a summary but loses the details you n
 
 When the context passes a threshold (75% by default), a band appears above the prompt:
 
-> 上下文已用 X%，做完當前任務後建議寫日誌並壓縮　［寫日誌並壓縮］［稍後］
+> 上下文已用 X%，做完目前的任務後建議寫日誌並壓縮　（按 Ctrl+X 再按 Tab 聚焦這一列，然後按括號內的鍵）［寫日誌並壓縮 (w)］［稍後 (l)］
+
+Where the terminal does not pass mouse clicks through, press Ctrl+X then Tab to focus the band, then the key in brackets: `w` writes the log and compacts, `l` is Later, `k` dismisses a message, `c` cancels a running flow.
 
 The band's text is in Chinese (it says "Context is X% used; when you finish the current task, consider writing a log and compacting", with the buttons "Write log and compact" and "Later"). The prompts it sends into the session and the bundled skill are in Chinese too, so the log comes out in Chinese unless you ask for another language.
 
