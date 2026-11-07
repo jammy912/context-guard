@@ -19,13 +19,16 @@ import {
 } from '../hooks/logic'
 
 describe('tiers', () => {
-  test('75 announces 75, 85, 90, 95', () => {
-    expect(tiersFor(75)).toEqual([75, 85, 90, 95])
+  test('75 announces 75, 85, 95', () => {
+    expect(tiersFor(75)).toEqual([75, 85, 95])
   })
-  test('a low test threshold keeps the fixed tiers above it', () => {
-    expect(tiersFor(10)).toEqual([10, 85, 90, 95])
+  test('65 announces every 10% from the threshold', () => {
+    expect(tiersFor(65)).toEqual([65, 75, 85, 95])
   })
-  test('a threshold above 95 is its own only tier', () => {
+  test('a low test threshold steps by 10 up to 99', () => {
+    expect(tiersFor(10)).toEqual([10, 20, 30, 40, 50, 60, 70, 80, 90])
+  })
+  test('a threshold above 90 is its own only tier', () => {
     expect(tiersFor(97)).toEqual([97])
   })
 })
@@ -39,15 +42,16 @@ describe('readings', () => {
       [80, false],
       [86, true],
       [88, false],
-      [91, true],
-      [92, false],
+      [91, false],
+      [96, true],
+      [97, false],
     ]
     for (const [percent, isDue] of steps) {
       const r = applyReading(v, percent, 75)
       expect(r.isNewTier).toBe(isDue)
       v = r.view
     }
-    expect(v.notifiedTier).toBe(90)
+    expect(v.notifiedTier).toBe(95)
   })
 
   test('dropping under the threshold starts the tiers over', () => {

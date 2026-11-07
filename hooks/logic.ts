@@ -45,12 +45,13 @@ export function readingOf(context: {
   return { percent, tokens: context.tokens, window: compactWindow, isCompactWindow: true }
 }
 
-const FIXED_TIERS = [85, 90, 95]
+const TIER_STEP = 10
 
-/** The tiers a threshold announces: the threshold itself, then 85, 90 and 95 above it. */
+/** The tiers a threshold announces: the threshold itself, then every 10% above it below 100. */
 export function tiersFor(threshold: number): number[] {
-  const all = [threshold, ...FIXED_TIERS.filter(t => t > threshold)]
-  return [...new Set(all)].sort((a, b) => a - b)
+  const tiers: number[] = []
+  for (let t = threshold; t < 100; t += TIER_STEP) tiers.push(t)
+  return tiers
 }
 
 /** The highest tier `percent` has reached, or null below the threshold. */

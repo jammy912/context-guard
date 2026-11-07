@@ -32,7 +32,7 @@ When the context passes a threshold (75% by default), a band appears above the p
 
 The band's text is in Chinese (it says "Context is X% used; when you finish the current task, consider writing a log and compacting", with the buttons "Write log and compact" and "Later"). The prompts it sends into the session and the bundled skill are in Chinese too, so the log comes out in Chinese unless you ask for another language.
 
-It only reminds. Nothing happens until you press the button. Each tier (the threshold, then 85 / 90 / 95) is announced once, and 「稍後」 (Later) hides the band until the next tier.
+It only reminds. Nothing happens until you press the button. Each tier (the threshold, then every 10% above it below 100, e.g. 65 / 75 / 85 / 95) is announced once, and 「稍後」 (Later) hides the band until the next tier.
 
 The percentage is measured against the auto-compact window when you set one smaller than the model's window (for example 400k on a 1M model), which is the same figure Desktop's context popover shows. Otherwise it is measured against the model's window.
 
