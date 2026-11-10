@@ -11,7 +11,7 @@ Claude Code 的 status line 腳本，改自 [kcchien/claude-code-statusline](htt
 subagent 執行時，prompt 下方的 agent 列會顯示各自的 context 用量：
 
 ```
-⚙ tddworker ███░░░░░░░ 30% 303.5k/1M · 12m24s · 正在編輯 FooTests.cs
+⚙ tddworker Opus 5.5 [high] ███░░░░░░░ 30% 303.5k/1M · 12m24s · 正在編輯 FooTests.cs
 ```
 
 ## 檔案
@@ -54,6 +54,7 @@ Windows 相容：
 6. 5h／7d 用量加重置時間，7d 帶中文星期（不靠 locale）；用量 <50 綠、50–79 黃、≥80 紅。
 7. 第二行尾顯示 session 名稱 `🤖 <name>`，就是其他 session 用 SendMessage 找你時用的名字。stdin JSON 沒有這個欄位，所以依 `session_id` 去查 `~/.claude/sessions/<pid>.json` 的 `name`。
 8. `subagent-statusline.sh`：用官方 `subagentStatusLine` 的 `tokenCount` ÷ `contextWindowSize` 算出 context%；完成顯示 ✓、失敗 ✗；描述依終端寬度截斷，不會切壞中文。
+   另顯示模型（`claude-opus-5-5` 縮成 `Opus 5.5`）與 effort（`[high]`，數字預算顯示成 `[8k]`）；這兩個欄位 Claude Code 沒給時就不顯示（effort 只有在 agent 定義或派工時指定才會有）。
 
 ## 已知問題
 
