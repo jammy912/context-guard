@@ -3,12 +3,21 @@
 # stdin：{ columns, tasks:[{id,name?,agentType,status,label,startTime,model?,contextWindowSize?,tokenCount,...}] }
 # stdout：每列一行 {"id":..., "content":...}；不輸出的列維持預設顯示（jq 不在或出錯 = 全部預設）
 # 顯示：⚙ tddworker Opus 5.5 [high] ██░░░░░░░░ 30% 303.5k/1M · 12m24s · 正在編輯 TWS005Tests.cs …
-#   model/effort 欄位沒給就不顯示（effort 只有 agent 定義或派工時有指定才會有）
+#   effort：有 .effort（agent 定義或派工時指定）就用它；沒有且 subagent 跟主 session 同模型 → 顯示繼承的 session effort
+#   （官方：同模型繼承 session effort）；不同模型或主 status line 還沒記錄 → 不顯示。model 沒給也不顯示
 #   context% 顏色：<70 綠、70–89 黃、≥90 紅（同主 status line）；字串截斷在 jq 內做（以字元為單位，不切壞中文）
 
 command -v jq >/dev/null 2>&1 || exit 0
+input=$(cat)
 
-jq -c '
+# 主 status line 記下的本 session 模型與 effort（/tmp/claude-statusline-sess-<session_id>，tab 分隔）
+sid=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null | tr -d '\r')
+smodel=""; seffort=""
+if [[ -n "$sid" && -f "/tmp/claude-statusline-sess-$sid" ]]; then
+  IFS=$'\t' read -r smodel seffort < "/tmp/claude-statusline-sess-$sid" || true
+fi
+
+printf '%s' "$input" | jq -c --arg smodel "$smodel" --arg seffort "$seffort" '
   def esc(c): "\u001b[" + c + "m";
   def rst: esc("0");
   def ktok: if . >= 1000 then ((. / 100 | floor) / 10 | tostring) + "k" else tostring end;
@@ -38,7 +47,10 @@ jq -c '
   | ((now - ((.startTime // (now * 1000)) / 1000)) | if . < 0 then 0 else . end | dur) as $el
   | (.label // .description // "") as $lb
   | ((if .model then " " + esc("36") + (.model | mshort) + rst else "" end)
-     + (if .effort != null then " " + esc("90") + "[" + (.effort | eff) + "]" + rst else "" end)) as $me
+     + (if .effort != null then " " + esc("90") + "[" + (.effort | eff) + "]" + rst
+        elif (.model != null and $seffort != "" and ((.model | sub("\\[.*$"; "")) == ($smodel | sub("\\[.*$"; ""))))
+          then " " + esc("90") + "[" + $seffort + "]" + rst
+        else "" end)) as $me
   | ((($cols - 75) / 2 | floor) | if . < 8 then 8 else . end) as $max
   | (if ($lb | length) > $max then $lb[0:$max] + "…" else $lb end) as $lbt
   | {id: .id,

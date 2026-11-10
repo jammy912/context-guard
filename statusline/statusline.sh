@@ -118,6 +118,7 @@ parsed=$(echo "$input" | jq -r '
   (.rate_limits.seven_day.resets_at // 0 | tostring),
   (.rate_limits.five_hour.resets_at // 0 | tostring),
   (.session_id // ""),
+  (.model.id // ""),
   "END"
 ' 2>/dev/null | tr -d '\r') || fallback_prompt "─ │ parse error"  # [Windows patch] jq.exe 輸出 CRLF
 
@@ -140,8 +141,15 @@ parsed=$(echo "$input" | jq -r '
   IFS= read -r rate7d_reset
   IFS= read -r rate5h_reset
   IFS= read -r session_id
+  IFS= read -r model_id
   IFS= read -r _sentinel
 } <<< "$parsed"
+
+# [local patch] 記下本 session 的模型與 effort 給 subagent-statusline.sh 用：
+# subagent 沒指定 effort 時，同模型會繼承 session 的 effort（官方 sub-agents 文件），但 subagent 列的 stdin 不會給這個值
+if [[ -n "${session_id:-}" ]]; then
+  printf '%s\t%s\n' "${model_id:-}" "${effort_level:-}" > "/tmp/claude-statusline-sess-${session_id}" 2>/dev/null || true
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # 模型
