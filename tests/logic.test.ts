@@ -15,6 +15,7 @@ import {
   tiersFor,
   worklogPath,
   logPrompt,
+  hasCompactMarker,
   LOG_SECTIONS,
 } from '../hooks/logic'
 
@@ -128,6 +129,15 @@ describe('worklog path', () => {
     expect(text).toContain('/home/user/.claude/worklogs/s1.md')
     expect(text).toContain(LOG_SECTIONS.map(s => `## ${s}`).join('、'))
     expect(text).not.toContain('log:')
+    expect(text).toContain('背景執行的 agent')
+  })
+
+  test('the compact marker counts only as the last non-empty line', () => {
+    expect(hasCompactMarker('節點結案。\n<<<CONTEXT-GUARD-COMPACT>>>\n\n')).toBe(true)
+    expect(hasCompactMarker('  <<<CONTEXT-GUARD-COMPACT>>>  ')).toBe(true)
+    expect(hasCompactMarker('<<<CONTEXT-GUARD-COMPACT>>>\n後面還有字')).toBe(false)
+    expect(hasCompactMarker('輸出 <<<CONTEXT-GUARD-COMPACT>>> 就會壓縮')).toBe(false)
+    expect(hasCompactMarker('')).toBe(false)
   })
 
   test('a Windows drive path links as file:///C:/…, named after the last separator', () => {

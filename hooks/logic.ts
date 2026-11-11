@@ -134,8 +134,9 @@ export function logPrompt(nonce: string, percent: number | null, logPath: string
     `1. 存到這個路徑（整份覆寫）：${logPath}`,
     '   檔案已存在時（同一個 session 先前寫過），先讀舊內容，合併成一份完整日誌再覆寫；全檔只能有一個「## 恢復會話」。',
     `2. 用這些二級標題，依序：${LOG_SECTIONS.map(s => `## ${s}`).join('、')}；沒有內容的段寫「無」，不要省略標題。`,
-    '3. 存檔後重新讀一次，確認檔案確實寫入磁碟。',
-    '4. 不要自己執行 /compact，本輪結束後 context-guard 會自動壓縮。',
+    '3. 「## 恢復會話」要寫明目前仍在背景執行的 agent、批次或排程：派工內容、驗收重點、輸出路徑、怎麼確認已結束；沒有就寫「無背景工作」。壓縮後要靠這段接手。',
+    '4. 存檔後重新讀一次，確認檔案確實寫入磁碟。',
+    '5. 不要自己執行 /compact，本輪結束後 context-guard 會自動壓縮。',
     '',
     '回覆的最後，原樣輸出下面這個區塊（不放進程式碼區塊，尖括號保留），context-guard 用它告訴壓縮摘要目前的目標：',
     '<<<CONTEXT-GUARD',
@@ -143,6 +144,22 @@ export function logPrompt(nonce: string, percent: number | null, logPath: string
     'pending: <剩餘事項，用「；」分隔，沒有就寫「無」>',
     'CONTEXT-GUARD>>>',
   ].join('\n')
+}
+
+/** The line an answer ends with to ask for the log-and-compact flow at a safe point. */
+export const COMPACT_MARKER = '<<<CONTEXT-GUARD-COMPACT>>>'
+
+/**
+ * Whether the answer asks for the flow: its last non-empty line is the marker alone, so an
+ * answer that only quotes or discusses the marker does not set it off.
+ */
+export function hasCompactMarker(answer: string): boolean {
+  const last = answer
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l !== '')
+    .at(-1)
+  return last === COMPACT_MARKER
 }
 
 export function compactInstructions(report: LogReport, logPath: string): string {

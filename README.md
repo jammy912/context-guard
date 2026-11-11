@@ -36,6 +36,8 @@ The band's text is in Chinese (it says "Context is X% used; when you finish the 
 
 It only reminds. Nothing happens until you press the button. Each tier (the threshold, then every 10% above it below 100, e.g. 65 / 75 / 85 / 95) is announced once, and 「稍後」 (Later) hides the band until the next tier.
 
+The one exception is a marker the model writes itself. When an answer's last non-empty line is exactly `<<<CONTEXT-GUARD-COMPACT>>>` and the fill is at or above the threshold, the guard runs the same flow as the button: log, compact, resume. Below the threshold, or with the guard off, the marker is ignored. This is meant for long unattended work, where the model writes the marker at a safe point (a finished step, no background agent still running) and the guard decides on the fill, which the model cannot see. Put the rule for when to write it in that work's own instructions. Sessions that never write the marker keep the remind-only behavior.
+
 The percentage is measured against the auto-compact window when you set one smaller than the model's window (for example 400k on a 1M model), which is the same figure Desktop's context popover shows. Otherwise it is measured against the model's window.
 
 Pressing 「寫日誌並壓縮」 (Write log and compact):

@@ -10,6 +10,7 @@ import {
   applyReading,
   compactInstructions,
   fileLink,
+  hasCompactMarker,
   isCompactUnavailable,
   isReminderShown,
   logPrompt,
@@ -402,6 +403,18 @@ export const register: Register = on => {
       await finishLogging($, e.answer, e.reason === 'answer')
     }
     await takeReading($)
+    if (v.phase === 'idle' && e.reason === 'answer' && hasCompactMarker(e.answer)) {
+      // The model marks a safe point; the guard decides on the fill, as the model cannot see it.
+      const s = await read($, settings)
+      const { percent, phase } = await read($, view)
+      if (s.isEnabled && phase === 'idle' && percent !== null && percent >= s.threshold) {
+        await note($, `marker at ${percent}% >= ${s.threshold}%: starting the flow`)
+        // Not awaited, as a press is not: the log prompt goes out once this turn has ended.
+        void startLogging($)
+      } else {
+        await note($, `marker ignored: ${percent ?? '?'}% threshold=${s.threshold}% enabled=${s.isEnabled} phase=${phase}`)
+      }
+    }
     return result
   })
 
